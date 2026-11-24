@@ -1,0 +1,6 @@
+.github/**
+.vscode/**
+.gitignore
+**/*.vsix
+*.vsix
+release-notes.md

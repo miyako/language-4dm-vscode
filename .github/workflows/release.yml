@@ -1,0 +1,120 @@
+name: Release VSIX
+
+# Bumps package.json, packages the extension, commits + tags the bump and
+# publishes the .vsix to a GitHub Release whose tag is the bare version
+# (e.g. 0.1.1), matching the existing release convention.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type (ignored when an explicit version is given)"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: "Explicit version to release, e.g. 0.1.1 (overrides bump)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump version
+        id: bump
+        env:
+          EXPLICIT_VERSION: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$EXPLICIT_VERSION" ]; then
+            npm version "$EXPLICIT_VERSION" --no-git-tag-version --allow-same-version
+          else
+            npm version "$BUMP" --no-git-tag-version
+          fi
+
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "vsix=4d-syntax-${VERSION}.vsix" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" > /dev/null 2>&1; then
+            echo "::error::tag $VERSION already exists on origin"
+            exit 1
+          fi
+
+      - name: Package VSIX
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          VSIX: ${{ steps.bump.outputs.vsix }}
+        run: |
+          set -euo pipefail
+          npx --yes @vscode/vsce@4.1.1 package --out "$VSIX"
+          unzip -l "$VSIX"
+
+      - name: Commit, tag and push
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          VSIX: ${{ steps.bump.outputs.vsix }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json "$VSIX"
+          git commit -m "$VERSION"
+          git tag "$VERSION"
+          git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          VSIX: ${{ steps.bump.outputs.vsix }}
+        run: |
+          set -euo pipefail
+          # HEAD is the version bump commit released by this run, so compare
+          # against its parent to keep the bump commit out of the notes.
+          PREVIOUS=$(git describe --tags --abbrev=0 "HEAD^" 2>/dev/null || true)
+          {
+            echo "VS Code extension package for 4D (\`.vsix\`)."
+            echo
+            echo '```'
+            echo "code --install-extension $VSIX"
+            echo '```'
+            echo
+            echo "Install from the Extensions view by picking \"Install from VSIX…\" and selecting the asset below."
+            if [ -n "$PREVIOUS" ]; then
+              echo
+              echo "Changes since $PREVIOUS:"
+              echo
+              git log --no-merges --pretty=format:'- %s' "$PREVIOUS..HEAD^"
+              echo
+            fi
+          } > release-notes.md
+          gh release create "$VERSION" "$VSIX" \
+            --title "$VERSION" \
+            --notes-file release-notes.md \
+            --verify-tag

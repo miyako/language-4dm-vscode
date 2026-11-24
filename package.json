@@ -2,9 +2,9 @@
 	"name": "4d-syntax",
 	"displayName": "4D Language Support",
 	"description": "Syntax highlighting for 4D",
-	"repository": "https://github.com/miyako/4d-syntax-vscode/",
+	"repository": "https://github.com/miyako/language-4dm-vscode/",
 	"version": "0.1.0",
-	"publisher": "Keisuke Miyako",
+	"publisher": "miyako",
 	"engines": {
 		"vscode": "^1.50.0"
 	},
