@@ -84,9 +84,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json "$VSIX"
-          git commit -m "$VERSION"
-          git tag "$VERSION"
-          git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
+          if git diff --cached --quiet; then
+            echo "Nothing to commit; package.json and $VSIX already match $VERSION"
+          else
+            git commit -m "$VERSION"
+          fi
+          git rev-parse -q --verify "refs/tags/$VERSION" > /dev/null || git tag -a "$VERSION" -m "$VERSION"
+          # Push the tag explicitly: --follow-tags skips lightweight tags.
+          git push origin "HEAD:${GITHUB_REF_NAME}" "refs/tags/$VERSION"
 
       - name: Publish release
         env:
